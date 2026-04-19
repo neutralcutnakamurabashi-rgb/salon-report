@@ -1,0 +1,15 @@
+# 環境変数（APIキー・トークン）
+.env
+
+# Googleサービスアカウントの認証情報
+config/service-account.json
+
+# 生成ファイル（コミット不要）
+output/
+data/
+
+# Node.js
+node_modules/
+
+# macOS
+.DS_Store

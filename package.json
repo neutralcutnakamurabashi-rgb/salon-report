@@ -1,0 +1,21 @@
+{
+  "name": "salon-report",
+  "version": "1.0.0",
+  "description": "美容室3店舗の月次レポートを自動生成してLINEへ画像配信するツール",
+  "type": "module",
+  "scripts": {
+    "fetch-data":          "node scripts/fetch-data.js",
+    "generate-html":       "node scripts/generate-html.js",
+    "generate-ai-comment": "node scripts/generate-ai-comment.js",
+    "screenshot":          "node scripts/screenshot.js",
+    "post-line":           "node scripts/post-line.js",
+    "run-all":             "npm run fetch-data && npm run generate-html && npm run generate-ai-comment && npm run screenshot && npm run post-line"
+  },
+  "dependencies": {
+    "@google-cloud/local-auth": "^3.0.1",
+    "googleapis": "^144.0.0",
+    "@anthropic-ai/sdk": "^0.32.1",
+    "playwright": "^1.49.1",
+    "dotenv": "^16.4.7"
+  }
+}

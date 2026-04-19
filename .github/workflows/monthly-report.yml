@@ -1,0 +1,56 @@
+name: 月次レポート自動配信
+
+on:
+  # 毎月10日 7:00 JST（UTC 22:00 = 前日）に自動実行
+  schedule:
+    - cron: '0 22 9 * *'
+  # 手動実行（テスト用）
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 依存関係インストール
+        run: npm ci
+
+      - name: Playwright（Chromium）インストール
+        run: npx playwright install chromium --with-deps
+
+      - name: Googleサービスアカウントキーを書き出し
+        run: |
+          mkdir -p config
+          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > config/service-account.json
+
+      - name: ① スプレッドシートからデータ取得
+        run: npm run fetch-data
+        env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_KEY: ./config/service-account.json
+
+      - name: ② AIコメント生成
+        run: npm run generate-ai-comment
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: ③ HTMLレポート生成
+        run: npm run generate-html
+
+      - name: ④ スクリーンショット撮影
+        run: npm run screenshot
+
+      - name: ⑤ LINE送信
+        run: npm run post-line
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_GROUP_ID:             ${{ secrets.LINE_GROUP_ID }}
+          SURGE_LOGIN:               ${{ secrets.SURGE_LOGIN }}
+          SURGE_TOKEN:               ${{ secrets.SURGE_TOKEN }}
+          SURGE_DOMAIN:              ${{ secrets.SURGE_DOMAIN }}
