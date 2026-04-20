@@ -21,41 +21,64 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+function laborStatus(rate) {
+  if (rate > 55) return '要注意（目標の55%を超過）';
+  if (rate > 45) return '適正（45〜55%の範囲内）';
+  return '良好（目標の45%を下回る）';
+}
+
 function buildPrompt(store) {
-  const { storeName, month, kpi, ageGender } = store;
-  const totalMale   = Object.values(ageGender.male).reduce((a, b) => a + b, 0);
-  const totalFemale = Object.values(ageGender.female).reduce((a, b) => a + b, 0);
+  const { storeName, month, kpi } = store;
+
+  const salesPrevMonthLine = kpi.sales.prevMonth !== null
+    ? `- 前月: ¥${kpi.sales.prevMonth.toLocaleString()}（${kpi.sales.current > kpi.sales.prevMonth ? '▲増加' : '▼減少'}）`
+    : '';
+  const salesPrevYearLine = kpi.sales.prevYear !== null
+    ? `- 前年同月: ¥${kpi.sales.prevYear.toLocaleString()}（${kpi.sales.current > kpi.sales.prevYear ? '▲増加' : '▼減少'}）`
+    : '';
+
+  const custPrevMonthLine = kpi.customers.prevMonth !== null
+    ? `- 前月比: ${kpi.customers.current - kpi.customers.prevMonth > 0 ? '+' : ''}${kpi.customers.current - kpi.customers.prevMonth}名`
+    : '';
+  const custPrevYearLine = kpi.customers.prevYear !== null
+    ? `- 前年同月比: ${kpi.customers.current - kpi.customers.prevYear > 0 ? '+' : ''}${kpi.customers.current - kpi.customers.prevYear}名`
+    : '';
+
+  const unitPriceDiffLine = kpi.unitPrice.prevMonth !== null
+    ? `- 前月比: ${kpi.unitPrice.current - kpi.unitPrice.prevMonth > 0 ? '+' : ''}¥${Math.abs(kpi.unitPrice.current - kpi.unitPrice.prevMonth).toLocaleString()}`
+    : '';
 
   return `あなたはカット専門店のアルバイトスタッフ向けに月次レポートのコメントを書くアシスタントです。
 専門用語を使わず、高校生のアルバイトでも理解できる言葉で書いてください。
-
+${store.storeId === 'sakuradai' ? `
+【重要】この店舗は基本的に1人シフトで運営しています。シフトの調整・人員配置・無駄なシフトに関するアドバイスは絶対に書かないでください。1人で店舗を回しているという現実を前提にコメントしてください。
+` : ''}
 ## ${storeName} ${month} のデータ
 
 ### 売上
 - 今月: ¥${kpi.sales.current.toLocaleString()}
-- 前月: ¥${kpi.sales.prevMonth.toLocaleString()}（${kpi.sales.current > kpi.sales.prevMonth ? '増加' : '減少'}）
-- 前年同月: ¥${kpi.sales.prevYear.toLocaleString()}（${kpi.sales.current > kpi.sales.prevYear ? '増加' : '減少'}）
+${salesPrevMonthLine}
+${salesPrevYearLine}
 
 ### 客数
 - 今月: ${kpi.customers.current}名
-- 前月比: ${kpi.customers.current - kpi.customers.prevMonth > 0 ? '+' : ''}${kpi.customers.current - kpi.customers.prevMonth}名
-- 前年同月比: ${kpi.customers.current - kpi.customers.prevYear > 0 ? '+' : ''}${kpi.customers.current - kpi.customers.prevYear}名
+${custPrevMonthLine}
+${custPrevYearLine}
 
 ### 客単価
 - 今月: ¥${kpi.unitPrice.current.toLocaleString()}
-- 前月比: ${kpi.unitPrice.current - kpi.unitPrice.prevMonth > 0 ? '+' : ''}¥${Math.abs(kpi.unitPrice.current - kpi.unitPrice.prevMonth).toLocaleString()}
+${unitPriceDiffLine}
 
 ### 人件費比率
-- ${kpi.laborCostRate.current}%（業界目安: 38%）
-- 状態: ${kpi.laborCostRate.current < 35 ? '良好（目安を大きく下回る）' : kpi.laborCostRate.current <= 40 ? '普通（目安前後）' : '要注意（目安を超過）'}
+- ${kpi.laborCostRate.current}%（目標ライン: 50%）
+- 状態: ${laborStatus(kpi.laborCostRate.current)}
 
 ### シフト効率
-- 時間売上（営業1時間あたりの売上）: ¥${kpi.salesPerHour.toLocaleString()}
+${store.storeId === 'sakuradai' ? `- 1人シフト店舗のため、シフト効率の指標は参考値
+- 時間売上: ¥${kpi.salesPerHour.toLocaleString()}/時間
+- 客単価: ¥${kpi.unitPrice.current.toLocaleString()}/名` : `- 時間売上（営業1時間あたりの売上）: ¥${kpi.salesPerHour.toLocaleString()}
 - 労働生産性（スタッフ1時間あたりの売上）: ¥${kpi.laborProductivity.toLocaleString()}
-- 差（無駄シフトの量）: ¥${(kpi.salesPerHour - kpi.laborProductivity).toLocaleString()}/時間
-
-### 客層（性別）
-- 男性: ${totalMale}名、女性: ${totalFemale}名
+- 差（シフトの余裕）: ¥${(kpi.salesPerHour - kpi.laborProductivity).toLocaleString()}/時間`}
 
 ## 出力形式（必ずこのJSONのみを返してください）
 

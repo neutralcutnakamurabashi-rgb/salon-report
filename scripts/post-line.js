@@ -92,9 +92,10 @@ async function main() {
   // Surgeにデプロイ
   const baseUrl = await deployToSurge();
 
-  // 月を取得
+  // 月を取得（前月 = データの対象月）
   const now = new Date();
-  const monthLabel = `${now.getFullYear()}年${now.getMonth() + 1}月度`;
+  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const monthLabel = `${prevMonth.getFullYear()}年${prevMonth.getMonth() + 1}月度`;
 
   // ヘッダーメッセージ
   await pushTextMessage(`📊 ${monthLabel} 月次レポート\n3店舗分をお届けします。`);

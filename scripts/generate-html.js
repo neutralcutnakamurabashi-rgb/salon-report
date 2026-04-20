@@ -1,105 +1,131 @@
 #!/usr/bin/env node
 /**
  * generate-html.js
- * store-data.json を読み込んで3店舗分のHTMLレポートを生成する
- *
- * 出力:
- *   output/report-sakuradai.html
- *   output/report-fujimidai.html
- *   output/report-nakamurashi.html
+ * store-data.json と ai-comments.json から3店舗分のHTMLレポートを生成する
  */
 
-import 'dotenv/config';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const dataDir    = path.join(__dirname, '..', 'data');
+const outputDir  = path.join(__dirname, '..', 'output');
 
-async function loadStoreData() {
-  const dataPath = path.join(__dirname, '..', 'data', 'store-data.json');
-  const raw = await fs.readFile(dataPath, 'utf-8');
-  return JSON.parse(raw);
+function fmt(n) {
+  if (n === null || n === undefined) return '—';
+  return Math.round(n).toLocaleString('ja-JP');
 }
 
-async function loadAiComments() {
-  try {
-    const dataPath = path.join(__dirname, '..', 'data', 'ai-comments.json');
-    const raw = await fs.readFile(dataPath, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return {};  // AIコメントが未生成の場合は空
-  }
+function pct(n) {
+  if (n === null || n === undefined) return '—';
+  return n.toFixed(2) + '%';
 }
 
-/**
- * 人件費比率に応じたカラーテーマを返す
- * 35%未満 → 緑（良好）/ 35〜40% → 黄（普通）/ 40%超 → 赤（要注意）
- */
-function getLaborCostTheme(rate) {
-  if (rate < 35) return { bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700', badge: '良好', bar: 'bg-emerald-500' };
-  if (rate <= 40) return { bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700', badge: '普通', bar: 'bg-amber-400' };
-  return { bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-600', badge: '要注意', bar: 'bg-red-400' };
+function diff(current, prev, isPercent = false) {
+  if (current === null || prev === null) return null;
+  return isPercent ? current - prev : current - prev;
 }
 
-function formatDiff(value, isPercent = false) {
-  if (value === 0) return { text: '±0', color: 'text-slate-400' };
-  const prefix = value > 0 ? '▲ +' : '▼ ';
-  const suffix = isPercent ? '%' : '';
-  const color = value > 0 ? 'text-emerald-500' : 'text-red-400';
-  return { text: `${prefix}${Math.abs(value)}${suffix}`, color };
+function arrowHtml(delta, higherIsBetter = true) {
+  if (delta === null) return '<span class="text-slate-400 text-xs">データなし</span>';
+  const positive = delta > 0;
+  const good = higherIsBetter ? positive : !positive;
+  const color  = delta === 0 ? 'text-slate-400' : (good ? 'text-emerald-500' : 'text-red-400');
+  const arrow  = delta === 0 ? '−' : (positive ? '▲ +' : '▼ ');
+  const val    = Math.abs(delta);
+  return `<span class="${color} text-xs font-bold">${arrow}${fmt(val)}</span>`;
 }
 
-function generateHtml(store, aiComment) {
-  const { kpi, salesHistory, ageGender, storeName, month } = store;
-  const laborTheme = getLaborCostTheme(kpi.laborCostRate.current);
-  const industryAvgRate = 38;
-  const laborBarWidth = Math.min((kpi.laborCostRate.current / 50) * 100, 100).toFixed(1);
-  const industryMarkerLeft = ((industryAvgRate / 50) * 100).toFixed(1);
-  const shiftDiff = kpi.salesPerHour - kpi.laborProductivity;
+function arrowPctHtml(delta, higherIsBetter = true) {
+  if (delta === null) return '<span class="text-slate-400 text-xs">データなし</span>';
+  const positive = delta > 0;
+  const good = higherIsBetter ? positive : !positive;
+  const color  = delta === 0 ? 'text-slate-400' : (good ? 'text-emerald-500' : 'text-red-400');
+  const arrow  = delta === 0 ? '−' : (positive ? '▲ +' : '▼ ');
+  const val    = Math.abs(delta).toFixed(1);
+  return `<span class="${color} text-xs font-bold">${arrow}${val}%</span>`;
+}
 
-  const salesDiffMonth = formatDiff(
-    ((kpi.sales.current - kpi.sales.prevMonth) / kpi.sales.prevMonth * 100).toFixed(1) * 1,
-    true
+// 人件費率のゾーン設定（30〜80%の範囲で表示）
+const LABOR_BAR_MIN = 30;
+const LABOR_BAR_MAX = 80;
+const LABOR_TARGET  = 50; // 目標ライン
+
+// 人件費率の表示テーマ
+function laborTheme(rate) {
+  if (rate === null) return { bg: 'bg-slate-50', border: 'border-slate-100', text: 'text-slate-800', label: '', labelColor: 'text-slate-400' };
+  if (rate > 55) return { bg: 'bg-red-50',    border: 'border-red-100',    text: 'text-red-600',    label: '要注意', labelColor: 'text-red-400' };
+  if (rate > 45) return { bg: 'bg-amber-50',  border: 'border-amber-100',  text: 'text-amber-600',  label: '適正',   labelColor: 'text-amber-500' };
+  return             { bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700', label: '良好',   labelColor: 'text-emerald-600' };
+}
+
+// バー上の位置（%）を計算
+function laborBarPos(value) {
+  const clamped = Math.min(Math.max(value, LABOR_BAR_MIN), LABOR_BAR_MAX);
+  return ((clamped - LABOR_BAR_MIN) / (LABOR_BAR_MAX - LABOR_BAR_MIN) * 100).toFixed(1);
+}
+
+// 売上推移グラフ用データ
+function chartData(history) {
+  const labels = JSON.stringify(history.map(h => h.month));
+  const values = JSON.stringify(history.map(h => +(h.sales / 10000).toFixed(1)));
+  const maxVal = Math.max(...history.map(h => h.sales));
+  const colors = history.map(h =>
+    h.sales === maxVal
+      ? 'rgba(20,184,166,0.85)'
+      : 'rgba(15,118,110,0.30)'
   );
-  const salesDiffYear = formatDiff(
-    ((kpi.sales.current - kpi.sales.prevYear) / kpi.sales.prevYear * 100).toFixed(1) * 1,
-    true
-  );
-  const customerDiffMonth = formatDiff(kpi.customers.current - kpi.customers.prevMonth);
-  const customerDiffYear  = formatDiff(kpi.customers.current - kpi.customers.prevYear);
-  const unitPriceDiff     = formatDiff(kpi.unitPrice.current - kpi.unitPrice.prevMonth);
+  return { labels, values, colors: JSON.stringify(colors) };
+}
 
-  const salesChartData = JSON.stringify(salesHistory.map(h => h.sales));
-  const salesChartLabels = JSON.stringify(salesHistory.map(h => h.month));
+function monthLabel(yyyymm) {
+  const [y, m] = yyyymm.split('-');
+  return `${y}年${parseInt(m)}月度`;
+}
 
-  const maleData   = JSON.stringify(Object.values(ageGender.male));
-  const femaleData = JSON.stringify(Object.values(ageGender.female).map(v => -v));
-  const totalMale   = Object.values(ageGender.male).reduce((a, b) => a + b, 0);
-  const totalFemale = Object.values(ageGender.female).reduce((a, b) => a + b, 0);
-  const total       = totalMale + totalFemale;
-  const maleRate    = total > 0 ? Math.round(totalMale / total * 100) : 0;
-  const femaleRate  = 100 - maleRate;
+function periodLabel(yyyymm) {
+  const [y, m] = yyyymm.split('-');
+  const mo = parseInt(m);
+  const days = new Date(parseInt(y), mo, 0).getDate();
+  return `集計期間：${y}年${mo}月1日〜${days}日`;
+}
 
-  const comment = aiComment ?? {
-    trend: 'データを取得中です。',
-    points: ['—', '—', '—'],
-    nextMonth: '—',
+function generateHtml(store, comment) {
+  const { storeName, month, kpi, salesHistory } = store;
+  const { sales, customers, laborCostRate, salesPerHour, laborProductivity } = kpi;
+
+  const laborT = laborTheme(laborCostRate.current);
+  const laborMarkerPos = laborCostRate.current !== null ? laborBarPos(laborCostRate.current) : 0;
+  const laborTargetPos = laborBarPos(LABOR_TARGET);
+  const shiftGap = (salesPerHour !== null && laborProductivity !== null)
+    ? salesPerHour - laborProductivity : null;
+
+  const salesDiffMonth  = diff(sales.current, sales.prevMonth);
+  const salesDiffYear   = diff(sales.current, sales.prevYear);
+  const custDiffMonth   = diff(customers.current, customers.prevMonth);
+  const custDiffYear    = diff(customers.current, customers.prevYear);
+
+  const chart = chartData(salesHistory);
+
+  const aiComment = comment ?? {
+    trend: 'AIコメントを生成中...',
+    point: [],
+    nextMonth: '',
   };
 
-  const pyramidMax = Math.max(
-    ...Object.values(ageGender.male),
-    ...Object.values(ageGender.female),
-    1
-  );
-  const pyramidAxisMax = Math.ceil(pyramidMax * 1.3);
+  const pointItems = (aiComment.points ?? []).map(p => `
+            <li class="flex gap-1.5">
+              <span class="text-red-400 flex-shrink-0 mt-0.5">▶</span>
+              <span>${p}</span>
+            </li>`).join('');
 
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${storeName} 月次レポート — ${month}</title>
+  <title>${storeName} 月次レポート — ${monthLabel(month)}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
@@ -114,115 +140,148 @@ function generateHtml(store, aiComment) {
     #reportCard { width: 390px; }
   </style>
 </head>
-<body class="bg-slate-300 py-8 px-4 flex flex-col items-center">
+
+<body class="bg-slate-300 min-h-screen py-8 px-4 flex flex-col items-center gap-4">
 
   <div id="reportCard" class="bg-white shadow-2xl overflow-hidden rounded-xl">
 
-    <!-- ▌HEADER -->
+    <!-- HEADER -->
     <div class="bg-gradient-to-br from-slate-900 via-slate-800 to-teal-900 px-5 pt-6 pb-5">
       <div class="flex items-center justify-between mb-3">
         <span class="text-xs font-bold tracking-widest text-teal-300 uppercase">Monthly Report</span>
         <span class="bg-teal-400/20 text-teal-200 text-xs font-bold px-3 py-1 rounded-full border border-teal-400/30">
-          ${month}
+          ${monthLabel(month)}
         </span>
       </div>
       <h1 class="text-white text-3xl font-black tracking-tight">${storeName}</h1>
+      <p class="text-slate-500 text-xs mt-1">${periodLabel(month)}</p>
     </div>
 
-    <!-- ▌KPI CARDS -->
+    <!-- KPI CARDS -->
     <div class="px-4 pt-4 space-y-2.5">
 
       <div class="grid grid-cols-2 gap-2.5">
+        <!-- 売上 -->
         <div class="bg-slate-50 rounded-2xl p-3.5 border border-slate-100">
           <p class="text-xs text-slate-400 font-medium mb-1.5">売上合計</p>
-          <p class="text-xl font-black text-slate-800 leading-none">¥${kpi.sales.current.toLocaleString()}</p>
+          <p class="text-xl font-black text-slate-800 leading-none">¥${fmt(sales.current)}</p>
           <div class="mt-2 space-y-0.5">
             <div class="flex items-center gap-1">
-              <span class="${salesDiffMonth.color} text-xs font-bold">${salesDiffMonth.text}</span>
+              ${arrowHtml(salesDiffMonth)}
               <span class="text-slate-400 text-xs">前月比</span>
             </div>
             <div class="flex items-center gap-1">
-              <span class="${salesDiffYear.color} text-xs font-bold">${salesDiffYear.text}</span>
+              ${arrowHtml(salesDiffYear)}
               <span class="text-slate-400 text-xs">前年同月比</span>
             </div>
           </div>
         </div>
+        <!-- 客数 -->
         <div class="bg-slate-50 rounded-2xl p-3.5 border border-slate-100">
           <p class="text-xs text-slate-400 font-medium mb-1.5">客数</p>
-          <p class="text-xl font-black text-slate-800 leading-none">${kpi.customers.current} <span class="text-sm font-bold text-slate-400">名</span></p>
+          <p class="text-xl font-black text-slate-800 leading-none">${fmt(customers.current)} <span class="text-sm font-bold text-slate-400">名</span></p>
           <div class="mt-2 space-y-0.5">
             <div class="flex items-center gap-1">
-              <span class="${customerDiffMonth.color} text-xs font-bold">${customerDiffMonth.text}名</span>
+              ${arrowHtml(custDiffMonth)}
               <span class="text-slate-400 text-xs">前月比</span>
             </div>
             <div class="flex items-center gap-1">
-              <span class="${customerDiffYear.color} text-xs font-bold">${customerDiffYear.text}名</span>
+              ${arrowHtml(custDiffYear)}
               <span class="text-slate-400 text-xs">前年同月比</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-2.5">
-        <div class="bg-slate-50 rounded-2xl p-3.5 border border-slate-100">
-          <p class="text-xs text-slate-400 font-medium mb-1.5">客単価</p>
-          <p class="text-xl font-black text-slate-800 leading-none">¥${kpi.unitPrice.current.toLocaleString()}</p>
-          <div class="mt-2">
-            <div class="flex items-center gap-1">
-              <span class="${unitPriceDiff.color} text-xs font-bold">${unitPriceDiff.text}</span>
-              <span class="text-slate-400 text-xs">前月比</span>
-            </div>
-          </div>
+      <!-- 人件費率 -->
+      <div class="${laborT.bg} rounded-2xl p-3.5 border ${laborT.border}">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-medium ${laborT.text}">人件費比率</p>
+          <span class="text-xs font-bold px-2 py-0.5 rounded-full ${
+            laborCostRate.current > 55 ? 'bg-red-100 text-red-600' :
+            laborCostRate.current > 45 ? 'bg-amber-100 text-amber-600' :
+            'bg-emerald-100 text-emerald-700'
+          }">${laborT.label}</span>
         </div>
-        <div class="${laborTheme.bg} rounded-2xl p-3.5 border ${laborTheme.border}">
-          <p class="text-xs ${laborTheme.text} font-medium mb-1.5">人件費比率</p>
-          <div class="flex items-baseline gap-1.5">
-            <p class="text-xl font-black ${laborTheme.text} leading-none">${kpi.laborCostRate.current}%</p>
-            <span class="text-xs font-bold ${laborTheme.text}">${laborTheme.badge}</span>
+        <p class="text-2xl font-black ${laborT.text} leading-none mb-3">${pct(laborCostRate.current)}</p>
+
+        <!-- ゾーンバー（30〜80%） -->
+        <div class="relative h-5 rounded-lg overflow-visible mb-1">
+          <!-- 背景ゾーン -->
+          <div class="absolute inset-0 flex rounded-lg overflow-hidden">
+            <div class="bg-emerald-200" style="width:30%"></div>
+            <div class="bg-amber-200"   style="width:20%"></div>
+            <div class="bg-red-200"     style="width:50%"></div>
           </div>
-          <div class="mt-2">
-            <div class="relative w-full bg-slate-200 rounded-full h-2">
-              <div class="${laborTheme.bar} h-2 rounded-full" style="width:${laborBarWidth}%"></div>
-              <div class="absolute top-0 h-2 w-0.5 bg-amber-500" style="left:${industryMarkerLeft}%"></div>
-            </div>
-            <div class="flex justify-between text-xs mt-1">
-              <span class="${laborTheme.text} font-bold">${kpi.laborCostRate.current}%</span>
-              <span class="text-amber-600 text-xs">目安 ${industryAvgRate}%</span>
-            </div>
-          </div>
+          <!-- 目標ライン（50%） -->
+          <div class="absolute top-0 bottom-0 w-0.5 bg-slate-600 opacity-60" style="left:${laborTargetPos}%"></div>
+          <!-- 現在値マーカー -->
+          <div class="absolute -top-1 w-3 h-3 rounded-full border-2 border-white shadow-md ${
+            laborCostRate.current > 55 ? 'bg-red-500' :
+            laborCostRate.current > 45 ? 'bg-amber-500' : 'bg-emerald-500'
+          }" style="left:calc(${laborMarkerPos}% - 6px)"></div>
         </div>
+
+        <!-- 軸ラベル -->
+        <div class="flex justify-between text-xs text-slate-400 mt-1 mb-2">
+          <span>30%</span>
+          <span class="text-emerald-600 font-bold">良好</span>
+          <span class="text-amber-500 font-bold">適正</span>
+          <span class="text-red-500 font-bold">要注意</span>
+          <span>80%</span>
+        </div>
+        <div class="text-xs text-slate-400">目標ライン <span class="font-bold text-slate-600">${LABOR_TARGET}%</span></div>
       </div>
 
-      <!-- シフト効率診断 -->
+      <!-- シフト効率診断 / 1人シフト稼働状況 -->
+      ${store.storeId === 'sakuradai' ? `
+      <div class="bg-slate-800 rounded-2xl p-4">
+        <p class="text-xs font-bold text-slate-300 mb-0.5">1人シフト稼働状況</p>
+        <p class="text-xs text-slate-500 mb-3">1人で店舗を運営しています</p>
+        <div class="grid grid-cols-2 gap-3 text-center">
+          <div>
+            <p class="text-xs text-blue-300 mb-1">時間売上</p>
+            <p class="text-lg font-black text-white leading-none">¥${fmt(salesPerHour)}</p>
+            <p class="text-xs text-slate-500 mt-0.5">/時間</p>
+            <p class="text-xs text-slate-600 mt-1.5">営業1時間あたりの稼ぎ</p>
+          </div>
+          <div>
+            <p class="text-xs text-teal-300 mb-1">客単価</p>
+            <p class="text-lg font-black text-white leading-none">¥${fmt(kpi.unitPrice.current)}</p>
+            <p class="text-xs text-slate-500 mt-0.5">/名</p>
+            <p class="text-xs text-slate-600 mt-1.5">お客様1名あたりの売上</p>
+          </div>
+        </div>
+      </div>` : `
       <div class="bg-slate-800 rounded-2xl p-4">
         <p class="text-xs font-bold text-slate-300 mb-0.5">シフト効率診断</p>
         <p class="text-xs text-slate-500 mb-3">差が大きいほど、無駄なシフトが発生しています</p>
         <div class="grid grid-cols-3 items-center gap-1 text-center">
           <div>
             <p class="text-xs text-blue-300 mb-1">時間売上</p>
-            <p class="text-lg font-black text-white leading-none">¥${kpi.salesPerHour.toLocaleString()}</p>
+            <p class="text-lg font-black text-white leading-none">¥${fmt(salesPerHour)}</p>
             <p class="text-xs text-slate-500 mt-0.5">/時間</p>
             <p class="text-xs text-slate-600 mt-1.5">営業1時間あたりの稼ぎ</p>
           </div>
           <div class="flex flex-col items-center gap-1">
-            <div class="${shiftDiff > 800 ? 'bg-red-500/20 border-red-500/30' : 'bg-amber-500/20 border-amber-500/30'} border rounded-xl px-3 py-1.5">
-              <p class="text-xs ${shiftDiff > 800 ? 'text-red-400' : 'text-amber-400'}">差</p>
-              <p class="text-base font-black ${shiftDiff > 800 ? 'text-red-300' : 'text-amber-300'}">¥${shiftDiff.toLocaleString()}</p>
+            <div class="${shiftGap !== null && shiftGap > 1000 ? 'bg-red-500/20 border-red-500/30' : 'bg-emerald-500/20 border-emerald-500/30'} border rounded-xl px-3 py-1.5">
+              <p class="text-xs ${shiftGap !== null && shiftGap > 1000 ? 'text-red-400' : 'text-emerald-400'}">差</p>
+              <p class="text-base font-black ${shiftGap !== null && shiftGap > 1000 ? 'text-red-300' : 'text-emerald-300'}">¥${fmt(shiftGap)}</p>
             </div>
-            <p class="text-xs text-slate-600">損失/時間</p>
+            <p class="text-xs text-slate-600">差/時間</p>
           </div>
           <div>
             <p class="text-xs text-teal-300 mb-1">労働生産性</p>
-            <p class="text-lg font-black text-white leading-none">¥${kpi.laborProductivity.toLocaleString()}</p>
+            <p class="text-lg font-black text-white leading-none">¥${fmt(laborProductivity)}</p>
             <p class="text-xs text-slate-500 mt-0.5">/時間</p>
             <p class="text-xs text-slate-600 mt-1.5">スタッフ1時間あたりの稼ぎ</p>
           </div>
         </div>
-      </div>
+      </div>`}
 
     </div>
 
-    <!-- ▌売上推移グラフ -->
+    <!-- 売上推移グラフ（6ヶ月） -->
     <div class="px-4 pt-4">
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-xs font-bold text-slate-700">売上推移（直近6ヶ月）</h2>
@@ -233,25 +292,7 @@ function generateHtml(store, aiComment) {
       </div>
     </div>
 
-    <!-- ▌人口ピラミッド -->
-    <div class="px-4 pt-4">
-      <h2 class="text-xs font-bold text-slate-700 mb-2">客層分布（年代 × 性別）</h2>
-      <div class="bg-slate-50 rounded-2xl border border-slate-100 p-3" style="height:210px; position:relative;">
-        <canvas id="pyramidChart"></canvas>
-      </div>
-      <div class="flex justify-center gap-5 mt-2">
-        <div class="flex items-center gap-1.5">
-          <span class="w-3 h-2.5 rounded bg-blue-400 inline-block"></span>
-          <span class="text-xs text-slate-500">男性 ${totalMale}名（${maleRate}%）</span>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <span class="w-3 h-2.5 rounded bg-pink-400 inline-block"></span>
-          <span class="text-xs text-slate-500">女性 ${totalFemale}名（${femaleRate}%）</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- ▌AIコメント -->
+    <!-- AIコメント -->
     <div class="px-4 pt-4 pb-5">
       <div class="bg-amber-50 rounded-2xl p-4 border border-amber-200">
         <div class="flex items-center gap-2 mb-3">
@@ -260,27 +301,31 @@ function generateHtml(store, aiComment) {
           </div>
           <h2 class="text-sm font-bold text-amber-800">今月のコメント</h2>
         </div>
+
         <div class="mb-3">
           <p class="text-xs font-bold text-amber-700 mb-1">今月の傾向</p>
-          <p class="text-xs text-amber-900 leading-relaxed">${comment.trend}</p>
+          <p class="text-xs text-amber-900 leading-relaxed">${aiComment.trend}</p>
         </div>
-        <div class="mb-3 bg-amber-100/70 rounded-xl p-3">
-          <p class="text-xs font-bold text-amber-700 mb-2">注目ポイント</p>
-          <ul class="text-xs text-amber-900 space-y-2">
-            ${comment.points.map(p => `<li class="flex gap-1.5"><span class="text-amber-500 flex-shrink-0 mt-0.5">▶</span><span>${p}</span></li>`).join('\n            ')}
+
+        ${pointItems ? `
+        <div class="mb-3 bg-red-50 rounded-xl p-3 border border-red-100">
+          <p class="text-xs font-bold text-red-600 mb-2">注目ポイント</p>
+          <ul class="text-xs text-red-900 space-y-2">${pointItems}
           </ul>
-        </div>
+        </div>` : ''}
+
+        ${aiComment.nextMonth ? `
         <div>
           <p class="text-xs font-bold text-amber-700 mb-1">来月に向けて</p>
-          <p class="text-xs text-amber-900 leading-relaxed">${comment.nextMonth}</p>
-        </div>
+          <p class="text-xs text-amber-900 leading-relaxed">${aiComment.nextMonth}</p>
+        </div>` : ''}
       </div>
     </div>
 
-    <!-- ▌FOOTER -->
+    <!-- FOOTER -->
     <div class="bg-slate-900 px-5 py-3 flex items-center justify-between">
       <p class="text-xs text-slate-500">${storeName} 月次レポート</p>
-      <p class="text-xs text-slate-500">${month} / 自動生成</p>
+      <p class="text-xs text-slate-500">${month.replace('-', '.')} / 自動生成</p>
     </div>
 
   </div>
@@ -289,51 +334,36 @@ function generateHtml(store, aiComment) {
     Chart.defaults.font.family = '"Noto Sans JP", sans-serif';
     Chart.defaults.animation = false;
 
+    const salesData = ${chart.values};
+    const maxSales = Math.max(...salesData);
+    const minY = Math.floor(Math.min(...salesData) * 0.9 / 10) * 10;
+    const maxY = Math.ceil(maxSales * 1.05 / 10) * 10;
+
     new Chart(document.getElementById('salesChart').getContext('2d'), {
       type: 'bar',
       data: {
-        labels: ${salesChartLabels},
+        labels: ${chart.labels},
         datasets: [{
-          data: ${salesChartData},
-          backgroundColor: [
-            'rgba(15,118,110,0.20)', 'rgba(15,118,110,0.28)', 'rgba(15,118,110,0.38)',
-            'rgba(15,118,110,0.58)', 'rgba(15,118,110,0.72)', 'rgba(15,118,110,0.90)',
-          ],
+          data: salesData,
+          backgroundColor: ${chart.colors},
           borderRadius: 5,
           borderSkipped: false,
         }]
       },
       options: {
-        responsive: true, maintainAspectRatio: false,
+        responsive: true,
+        maintainAspectRatio: false,
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: ctx => '¥' + (ctx.parsed.y * 10000).toLocaleString() } }
+          tooltip: { callbacks: { label: ctx => '¥' + (ctx.parsed.y * 10000).toLocaleString() + '万' } }
         },
         scales: {
           x: { grid: { display: false }, ticks: { font: { size: 10 }, color: '#94A3B8' } },
-          y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 10 }, color: '#94A3B8', callback: v => v + '万' } }
-        }
-      }
-    });
-
-    new Chart(document.getElementById('pyramidChart').getContext('2d'), {
-      type: 'bar',
-      data: {
-        labels: ['10代', '20代', '30代', '40代', '50代', '60代+'],
-        datasets: [
-          { label: '女性', data: ${femaleData}, backgroundColor: 'rgba(244,114,182,0.75)', borderColor: 'rgba(244,114,182,1)', borderWidth: 1, borderRadius: 3 },
-          { label: '男性', data: ${maleData},   backgroundColor: 'rgba(96,165,250,0.75)',  borderColor: 'rgba(96,165,250,1)',  borderWidth: 1, borderRadius: 3 }
-        ]
-      },
-      options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + Math.abs(ctx.parsed.x) + '名' } }
-        },
-        scales: {
-          x: { min: -${pyramidAxisMax}, max: ${pyramidAxisMax}, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 }, color: '#94A3B8', callback: v => Math.abs(v) } },
-          y: { grid: { display: false }, ticks: { font: { size: 10 }, color: '#64748B' } }
+          y: {
+            min: minY, max: maxY,
+            grid: { color: 'rgba(0,0,0,0.05)' },
+            ticks: { font: { size: 10 }, color: '#94A3B8', callback: v => v + '万' }
+          }
         }
       }
     });
@@ -346,19 +376,27 @@ function generateHtml(store, aiComment) {
 }
 
 async function main() {
-  const { stores } = await loadStoreData();
-  const aiComments = await loadAiComments();
+  const storeDataPath = path.join(dataDir, 'store-data.json');
+  const raw = JSON.parse(await fs.readFile(storeDataPath, 'utf-8'));
 
-  const outputDir = path.join(__dirname, '..', 'output');
+  // AIコメントがあれば読み込む（なければ空）
+  let aiComments = {};
+  try {
+    aiComments = JSON.parse(await fs.readFile(path.join(dataDir, 'ai-comments.json'), 'utf-8'));
+  } catch {
+    console.log('ℹ️  ai-comments.json が見つかりません。AIコメントなしで生成します。');
+  }
+
   await fs.mkdir(outputDir, { recursive: true });
 
-  for (const store of stores) {
-    const comment = aiComments[store.storeId];
-    const html = generateHtml(store, comment);
-    const filename = `report-${store.storeId}.html`;
-    await fs.writeFile(path.join(outputDir, filename), html);
-    console.log(`✅ output/${filename} を生成しました`);
+  for (const store of raw.stores) {
+    const html = generateHtml(store, aiComments[store.storeId] ?? null);
+    const outPath = path.join(outputDir, `report-${store.storeId}.html`);
+    await fs.writeFile(outPath, html, 'utf-8');
+    console.log(`✅ ${store.storeName} → output/report-${store.storeId}.html`);
   }
+
+  console.log('\n💾 output/ フォルダにHTMLを生成しました');
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

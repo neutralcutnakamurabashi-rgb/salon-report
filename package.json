@@ -9,6 +9,7 @@
     "generate-ai-comment": "node scripts/generate-ai-comment.js",
     "screenshot":          "node scripts/screenshot.js",
     "post-line":           "node scripts/post-line.js",
+    "migrate":             "node scripts/migrate-data.js",
     "run-all":             "npm run fetch-data && npm run generate-html && npm run generate-ai-comment && npm run screenshot && npm run post-line"
   },
   "dependencies": {
