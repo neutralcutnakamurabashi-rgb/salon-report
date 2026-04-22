@@ -91,7 +91,104 @@ function periodLabel(yyyymm) {
   return `集計期間：${y}年${mo}月1日〜${days}日`;
 }
 
-function generateHtml(store, comment) {
+function pyramidSection(demo) {
+  if (!demo) return '';
+
+  const malePct   = demo.total > 0 ? Math.round(demo.maleTotal   / demo.total * 100) : 0;
+  const femalePct = demo.total > 0 ? Math.round(demo.femaleTotal / demo.total * 100) : 0;
+  const maxVal    = Math.max(...demo.ageGroups.map(g => Math.max(g.male, g.female)));
+  const axisMax   = Math.ceil(maxVal * 1.15 / 10) * 10;
+
+  const topMale   = [...demo.ageGroups].sort((a, b) => b.male   - a.male)[0];
+  const topFemale = [...demo.ageGroups].sort((a, b) => b.female - a.female)[0];
+
+  return `
+    <!-- 客層分析 -->
+    <div class="px-4 pt-4">
+      <h2 class="text-xs font-bold text-slate-700 mb-2">客層分析（${demo.month.replace('-', '年').replace(/^(\d+年)0?(\d+)$/, '$1$2月')}）</h2>
+
+      <!-- 男女比サマリー -->
+      <div class="grid grid-cols-3 gap-2 mb-3">
+        <div class="bg-blue-50 rounded-xl p-2.5 text-center border border-blue-100">
+          <p class="text-xs text-blue-600 font-bold mb-0.5">男性</p>
+          <p class="text-xl font-black text-blue-800">${malePct}<span class="text-sm">%</span></p>
+          <p class="text-xs text-blue-400">${demo.maleTotal}名</p>
+        </div>
+        <div class="bg-pink-50 rounded-xl p-2.5 text-center border border-pink-100">
+          <p class="text-xs text-pink-600 font-bold mb-0.5">女性</p>
+          <p class="text-xl font-black text-pink-800">${femalePct}<span class="text-sm">%</span></p>
+          <p class="text-xs text-pink-400">${demo.femaleTotal}名</p>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-2.5 text-center border border-slate-100">
+          <p class="text-xs text-slate-500 font-bold mb-0.5">合計</p>
+          <p class="text-xl font-black text-slate-700">${demo.total}</p>
+          <p class="text-xs text-slate-400">名</p>
+        </div>
+      </div>
+
+      <!-- ピラミッドチャート -->
+      <div class="flex justify-between text-xs text-slate-400 mb-1 px-1">
+        <span class="text-blue-400 font-bold">← 男性</span>
+        <span class="text-pink-400 font-bold">女性 →</span>
+      </div>
+      <div class="bg-slate-50 rounded-2xl border border-slate-100 p-3" style="height:230px; position:relative;">
+        <canvas id="pyramidChart"></canvas>
+      </div>
+
+      <!-- 最多年代 -->
+      <div class="grid grid-cols-2 gap-2 mt-2">
+        <div class="bg-slate-50 rounded-xl p-2.5 border-l-4 border-blue-400">
+          <p class="text-xs text-slate-400 mb-0.5">男性最多</p>
+          <p class="text-sm font-black text-slate-700">${topMale.label} <span class="text-blue-500">${topMale.male}名</span></p>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-2.5 border-l-4 border-pink-400">
+          <p class="text-xs text-slate-400 mb-0.5">女性最多</p>
+          <p class="text-sm font-black text-slate-700">${topFemale.label} <span class="text-pink-500">${topFemale.female}名</span></p>
+        </div>
+      </div>
+    </div>
+
+    <script id="pyramidData" type="application/json">${JSON.stringify({ ageGroups: demo.ageGroups, axisMax })}</script>`;
+}
+
+function pyramidScript(demo) {
+  if (!demo) return '';
+  return `
+    const _pd = JSON.parse(document.getElementById('pyramidData').textContent);
+    new Chart(document.getElementById('pyramidChart').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: _pd.ageGroups.map(g => g.label),
+        datasets: [
+          { label: '男性', data: _pd.ageGroups.map(g => -g.male),   backgroundColor: '#63b3ed', borderRadius: 3, barPercentage: 0.75 },
+          { label: '女性', data: _pd.ageGroups.map(g => g.female), backgroundColor: '#f687b3', borderRadius: 3, barPercentage: 0.75 }
+        ]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + Math.abs(ctx.raw) + '名' } }
+        },
+        scales: {
+          x: {
+            min: -_pd.axisMax,
+            max:  _pd.axisMax,
+            ticks: { callback: v => Math.abs(v), font: { size: 10 }, color: '#94A3B8', maxTicksLimit: 6 },
+            grid: { color: 'rgba(0,0,0,0.05)' }
+          },
+          y: {
+            ticks: { font: { size: 11 }, color: '#4a5568' },
+            grid: { display: false }
+          }
+        }
+      }
+    });`;
+}
+
+function generateHtml(store, comment, demographics = null) {
   const { storeName, month, kpi, salesHistory } = store;
   const { sales, customers, laborCostRate, salesPerHour, laborProductivity } = kpi;
 
@@ -292,6 +389,8 @@ function generateHtml(store, comment) {
       </div>
     </div>
 
+    ${pyramidSection(demographics)}
+
     <!-- AIコメント -->
     <div class="px-4 pt-4 pb-5">
       <div class="bg-amber-50 rounded-2xl p-4 border border-amber-200">
@@ -368,6 +467,8 @@ function generateHtml(store, comment) {
       }
     });
 
+    ${pyramidScript(demographics)}
+
     window.__chartsReady = true;
   </script>
 
@@ -387,10 +488,21 @@ async function main() {
     console.log('ℹ️  ai-comments.json が見つかりません。AIコメントなしで生成します。');
   }
 
+  // 客層データがあれば読み込む（なければスキップ）
+  let demographicsData = {};
+  try {
+    const demo = JSON.parse(await fs.readFile(path.join(dataDir, 'demographics.json'), 'utf-8'));
+    demographicsData = demo.stores ?? {};
+    console.log('✅ demographics.json を読み込みました');
+  } catch {
+    console.log('ℹ️  demographics.json が見つかりません。客層ピラミッドなしで生成します。');
+  }
+
   await fs.mkdir(outputDir, { recursive: true });
 
   for (const store of raw.stores) {
-    const html = generateHtml(store, aiComments[store.storeId] ?? null);
+    const demographics = demographicsData[store.storeId] ?? null;
+    const html = generateHtml(store, aiComments[store.storeId] ?? null, demographics);
     const outPath = path.join(outputDir, `report-${store.storeId}.html`);
     await fs.writeFile(outPath, html, 'utf-8');
     console.log(`✅ ${store.storeName} → output/report-${store.storeId}.html`);

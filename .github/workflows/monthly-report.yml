@@ -35,6 +35,12 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_KEY: ./config/service-account.json
 
+      - name: ① 客層データ取得
+        run: npm run fetch-demographics
+        env:
+          DEMOGRAPHICS_SPREADSHEET_ID: ${{ secrets.DEMOGRAPHICS_SPREADSHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_KEY: ./config/service-account.json
+
       - name: ② AIコメント生成
         run: npm run generate-ai-comment
         env:
