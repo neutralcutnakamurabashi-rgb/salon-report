@@ -167,7 +167,7 @@ async function main() {
         const cur = s.currentSales;
         const prv = s.prevSales;
         const d = (cur !== null && prv !== null) ? cur - prv : null;
-        const sign = d !== null ? (d >= 0 ? '+' : '') : '';
+        const sign = d !== null ? (d >= 0 ? '▲' : '▼') : '';
         const color = d !== null ? (d >= 0 ? '#059669' : '#dc2626') : '#94a3b8';
         return `
       <tr style="border-top:1px solid #f1f5f9">
@@ -180,7 +180,7 @@ async function main() {
         <td style="padding:10px;font-size:13px;font-weight:700;color:#0f172a">3店舗合計</td>
         <td style="padding:10px;font-size:15px;font-weight:900;color:#0f172a;text-align:right">¥${storeSales.total.current.toLocaleString()}</td>
         <td style="padding:10px;font-size:12px;text-align:right;color:${storeSales.total.current >= storeSales.total.prev ? '#059669' : '#dc2626'}">
-          ${storeSales.total.prev > 0 ? (storeSales.total.current >= storeSales.total.prev ? '+' : '') + '¥' + Math.abs(storeSales.total.current - storeSales.total.prev).toLocaleString() : '—'}
+          ${storeSales.total.prev > 0 ? (storeSales.total.current >= storeSales.total.prev ? '▲' : '▼') + '¥' + Math.abs(storeSales.total.current - storeSales.total.prev).toLocaleString() : '—'}
         </td>
       </tr>
     </table>
