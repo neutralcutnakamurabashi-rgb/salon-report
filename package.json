@@ -4,20 +4,25 @@
   "description": "美容室3店舗の月次レポートを自動生成してLINEへ画像配信するツール",
   "type": "module",
   "scripts": {
-    "fetch-data":          "node scripts/fetch-data.js",
-    "fetch-demographics":  "node scripts/fetch-demographics.js",
-    "generate-html":       "node scripts/generate-html.js",
+    "fetch-data": "node scripts/fetch-data.js",
+    "fetch-demographics": "node scripts/fetch-demographics.js",
+    "generate-html": "node scripts/generate-html.js",
     "generate-ai-comment": "node scripts/generate-ai-comment.js",
-    "screenshot":          "node scripts/screenshot.js",
-    "post-line":           "node scripts/post-line.js",
-    "migrate":             "node scripts/migrate-data.js",
-    "run-all":             "npm run fetch-data && npm run fetch-demographics && npm run generate-ai-comment && npm run generate-html && npm run screenshot && npm run post-line"
+    "screenshot": "node scripts/screenshot.js",
+    "post-line": "node scripts/post-line.js",
+    "migrate": "node scripts/migrate-data.js",
+    "run-all": "npm run fetch-data && npm run fetch-demographics && npm run generate-ai-comment && npm run generate-html && npm run screenshot && npm run post-line",
+    "fetch-manager": "node scripts/fetch-manager-report.js",
+    "generate-manager": "node scripts/generate-manager-email.js",
+    "send-manager-preview": "SEND_MODE=preview node scripts/send-manager-email.js",
+    "send-manager": "SEND_MODE=send node scripts/send-manager-email.js"
   },
   "dependencies": {
-    "@google-cloud/local-auth": "^3.0.1",
-    "googleapis": "^144.0.0",
     "@anthropic-ai/sdk": "^0.32.1",
-    "playwright": "^1.49.1",
-    "dotenv": "^16.4.7"
+    "@google-cloud/local-auth": "^3.0.1",
+    "dotenv": "^16.4.7",
+    "googleapis": "^144.0.0",
+    "nodemailer": "^8.0.7",
+    "playwright": "^1.49.1"
   }
 }
