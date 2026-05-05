@@ -115,17 +115,27 @@ async function main() {
   let commentText = '';
   let sendDate = '';
   const commentSheetId = COMMENT_SPREADSHEET_ID ?? SPREADSHEET_ID;
+  // シート名は「シート1」（デフォルト）
+  const COMMENT_SHEET = 'シート1';
   try {
     const commentRes = await sheets.spreadsheets.values.get({
       spreadsheetId: commentSheetId,
-      range: '月次コメント!B1:B2',
+      range: `${COMMENT_SHEET}!A1:B10`,
     });
-    const commentVals = commentRes.data.values ?? [];
-    sendDate    = commentVals[0]?.[0] ?? '';
-    commentText = commentVals[1]?.[0] ?? '';
+    const rows = commentRes.data.values ?? [];
+    // 各行の A列=ラベル, B列=テキスト をすべて結合してコメントにする
+    const parts = [];
+    for (const row of rows) {
+      const label = (row[0] ?? '').trim();
+      const text  = (row[1] ?? '').trim();
+      if (text) parts.push(text);
+      // 「送信予定日」ラベルの行は sendDate として保存
+      if (label.includes('送信') && text) sendDate = text;
+    }
+    commentText = parts.join('\n\n');
     console.log(`✅ コメント取得: ${commentText.length}文字`);
   } catch (e) {
-    console.warn('⚠️  月次コメントシートが見つかりません（スプレッドシートを確認してください）');
+    console.warn('⚠️  コメントシートが見つかりません（スプレッドシートを確認してください）');
     console.warn(e.message);
   }
 
