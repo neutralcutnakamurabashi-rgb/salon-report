@@ -12,6 +12,7 @@
     "post-line": "node scripts/post-line.js",
     "migrate": "node scripts/migrate-data.js",
     "run-all": "npm run fetch-data && npm run fetch-demographics && npm run generate-ai-comment && npm run generate-html && npm run screenshot && npm run post-line",
+    "fetch-store-sales": "node scripts/fetch-store-sales.js",
     "fetch-manager": "node scripts/fetch-manager-report.js",
     "generate-manager": "node scripts/generate-manager-email.js",
     "send-manager-preview": "SEND_MODE=preview node scripts/send-manager-email.js",

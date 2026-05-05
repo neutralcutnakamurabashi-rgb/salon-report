@@ -71,6 +71,15 @@ async function main() {
     console.warn('⚠️  store-data.json が見つかりません');
   }
 
+  // 日別売上スプレッドシートからの月合計データ
+  let storeSales = null;
+  try {
+    const storeSalesPath = path.join(__dirname, '..', 'data', 'store-sales.json');
+    storeSales = JSON.parse(await fs.readFile(storeSalesPath, 'utf-8'));
+  } catch (e) {
+    console.warn('⚠️  store-sales.json が見つかりません');
+  }
+
   console.log('✍️  AIでコメントを整文中...');
   const polishedComment = await summarizeComment(data.commentText);
 
@@ -146,28 +155,36 @@ async function main() {
       </tr>
     </table>
     ` : `
-    ${storeData ? `
+    ${storeSales ? `
     <p style="margin:0 0 12px;font-size:13px;color:#475569">今月の売上データをお届けします。粗利・経費・営業利益は集計確定後に改めてお送りします。</p>
     <table style="width:100%;border-collapse:collapse">
       <tr style="background:#f8fafc">
         <td style="padding:8px 10px;font-size:11px;font-weight:700;color:#64748b">店舗</td>
-        <td style="padding:8px 10px;font-size:11px;font-weight:700;color:#64748b;text-align:right">今月売上</td>
+        <td style="padding:8px 10px;font-size:11px;font-weight:700;color:#64748b;text-align:right">当月売上</td>
         <td style="padding:8px 10px;font-size:11px;font-weight:700;color:#64748b;text-align:right">前月比</td>
       </tr>
-      ${storeData.stores.map(s => {
-        const cur = s.kpi.sales.current;
-        const prv = s.kpi.sales.prevMonth;
-        const d = (cur && prv) ? cur - prv : null;
+      ${storeSales.stores.map(s => {
+        const cur = s.currentSales;
+        const prv = s.prevSales;
+        const d = (cur !== null && prv !== null) ? cur - prv : null;
         const sign = d !== null ? (d >= 0 ? '+' : '') : '';
         const color = d !== null ? (d >= 0 ? '#059669' : '#dc2626') : '#94a3b8';
         return `
       <tr style="border-top:1px solid #f1f5f9">
         <td style="padding:10px;font-size:13px;color:#334155">${s.storeName}</td>
-        <td style="padding:10px;font-size:14px;font-weight:700;color:#0f172a;text-align:right">${cur ? '¥' + cur.toLocaleString() : '—'}</td>
+        <td style="padding:10px;font-size:14px;font-weight:700;color:#0f172a;text-align:right">${cur !== null ? '¥' + cur.toLocaleString() : '—'}</td>
         <td style="padding:10px;font-size:12px;text-align:right;color:${color}">${d !== null ? sign + '¥' + Math.abs(Math.round(d)).toLocaleString() : '—'}</td>
       </tr>`;
       }).join('')}
+      <tr style="border-top:2px solid #0f172a;background:#f8fafc">
+        <td style="padding:10px;font-size:13px;font-weight:700;color:#0f172a">3店舗合計</td>
+        <td style="padding:10px;font-size:15px;font-weight:900;color:#0f172a;text-align:right">¥${storeSales.total.current.toLocaleString()}</td>
+        <td style="padding:10px;font-size:12px;text-align:right;color:${storeSales.total.current >= storeSales.total.prev ? '#059669' : '#dc2626'}">
+          ${storeSales.total.prev > 0 ? (storeSales.total.current >= storeSales.total.prev ? '+' : '') + '¥' + Math.abs(storeSales.total.current - storeSales.total.prev).toLocaleString() : '—'}
+        </td>
+      </tr>
     </table>
+    <p style="margin:12px 0 0;font-size:11px;color:#94a3b8">※ 粗利・人件費・経費・営業利益は数値確定後に改めてお送りします。</p>
     ` : `<p style="margin:0;color:#94a3b8;font-size:13px">先月分の数値は現在集計中です。確定次第、改めてお送りします。</p>`}
     `}
   </div>
