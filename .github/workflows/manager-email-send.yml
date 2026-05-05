@@ -23,19 +23,25 @@ jobs:
           mkdir -p config
           echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > config/service-account.json
 
-      - name: ① 財務データ・コメント取得
+      - name: ① 各店舗KPIデータ取得
+        run: node scripts/fetch-data.js
+        env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_KEY: ./config/service-account.json
+
+      - name: ② 財務データ・コメント取得
         run: node scripts/fetch-manager-report.js
         env:
           SPREADSHEET_ID:          ${{ secrets.SPREADSHEET_ID }}
           COMMENT_SPREADSHEET_ID:  ${{ secrets.COMMENT_SPREADSHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_KEY: ./config/service-account.json
 
-      - name: ② HTMLメール生成（AIコメント整文）
+      - name: ③ HTMLメール生成（AIコメント整文）
         run: node scripts/generate-manager-email.js
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
-      - name: ③ 本送信（大西店長宛）
+      - name: ④ 本送信（大西店長宛）
         run: node scripts/send-manager-email.js
         env:
           GMAIL_USER:         ${{ secrets.GMAIL_USER }}
