@@ -26,7 +26,8 @@ jobs:
       - name: ① 財務データ・コメント取得
         run: node scripts/fetch-manager-report.js
         env:
-          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          SPREADSHEET_ID:          ${{ secrets.SPREADSHEET_ID }}
+          COMMENT_SPREADSHEET_ID:  ${{ secrets.COMMENT_SPREADSHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_KEY: ./config/service-account.json
 
       - name: ② HTMLメール生成（AIコメント整文）

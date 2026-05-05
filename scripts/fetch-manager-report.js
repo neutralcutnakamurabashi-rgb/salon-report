@@ -12,8 +12,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SERVICE_ACCOUNT_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_KEY ?? './config/service-account.json';
+const SPREADSHEET_ID         = process.env.SPREADSHEET_ID;
+const COMMENT_SPREADSHEET_ID = process.env.COMMENT_SPREADSHEET_ID;
+const SERVICE_ACCOUNT_KEY    = process.env.GOOGLE_SERVICE_ACCOUNT_KEY ?? './config/service-account.json';
 
 // 全社シートの行インデックス（0始まり、行27=インデックス26）
 const ROW = {
@@ -109,13 +110,14 @@ async function main() {
   const latestData = financials[financials.length - 1];
   const prevData   = financials[financials.length - 2] ?? null;
 
-  // ② 月次コメントシートを取得
+  // ② 月次コメントシートを取得（別スプレッドシート）
   console.log('📖 月次コメントシートを読み込み中...');
   let commentText = '';
   let sendDate = '';
+  const commentSheetId = COMMENT_SPREADSHEET_ID ?? SPREADSHEET_ID;
   try {
     const commentRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: commentSheetId,
       range: '月次コメント!B1:B2',
     });
     const commentVals = commentRes.data.values ?? [];
@@ -123,7 +125,8 @@ async function main() {
     commentText = commentVals[1]?.[0] ?? '';
     console.log(`✅ コメント取得: ${commentText.length}文字`);
   } catch (e) {
-    console.warn('⚠️  月次コメントシートが見つかりません（後で追加してください）');
+    console.warn('⚠️  月次コメントシートが見つかりません（スプレッドシートを確認してください）');
+    console.warn(e.message);
   }
 
   // 保存
